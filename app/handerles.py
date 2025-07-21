@@ -295,15 +295,17 @@ async def handle_arrived_goods(message: Message):
 async def handle_received_goods(message: Message):
     await Otchyt('ПолученныеТовары', message)
 @router.message(F.text== slovar.get_dictionary('МоиКоды', lang))
-async def handle_my_codes(callback: CallbackQuery):
+async def handle_my_codes(message: Message):
+    global  user_id
     conn = DATA_BaseTG.get_connection()  # или pyodbc.connect(...)
     cursor = conn.cursor()
-    cursor.execute("SELECT НомерТелефона FROM TelegramChats WHERE Ид = ?", (user_id,))
+    cursor.execute("SELECT НомерТелефона FROM TelegramChats WHERE Ид = ?", (message.from_user.id,))
     telefon_numbers = cursor.fetchone()
-    file_path = DATA_BaseTG.MyKods(telefon_numbers)  # Добавляем код!
+    cleaned_numbers = telefon_numbers[0][1:]
+    file_path = DATA_BaseTG.MyKods(str(cleaned_numbers))  # Добавляем код!
     doc = FSInputFile(file_path)
 
-    await callback.message.answer_document(
+    await message.answer_document(
         document=doc,
         caption=f"📦 {slovar.get_dictionary('ОтчетМоиКоды', lang)}"
     )

@@ -187,24 +187,48 @@ def Create_Cliente():
 
     create_clients_table = '''
         IF OBJECT_ID('Клиенты', 'U') IS NULL
-        BEGIN
-            CREATE TABLE Клиенты (
-                КодКлиента INT PRIMARY KEY,       -- Пример: 00077
-                ТипКода NVARCHAR(50),            -- Пример: Авто
-                Статус NVARCHAR(100),            -- Пример: Клиент, Представитель и т.д.
-                Фамилия NVARCHAR(100),
-                Имя NVARCHAR(100),
-                СерияПаспорта NVARCHAR(10),
-                НомерПаспорта NVARCHAR(20),
-                НомерID NVARCHAR(50),
-                НомерТелефона NVARCHAR(50),
-                НомерТелеграмма NVARCHAR(20),
-                GUID UNIQUEIDENTIFIER NOT NULL,
-                Рейтинг DECIMAL(5,2),
-                ФИО NVARCHAR(255),
-                ИД NVARCHAR(255),
-            )
-        END
+BEGIN
+    CREATE TABLE Клиенты (
+    КодКлиента INT PRIMARY KEY,
+    ТипКода NVARCHAR(50),
+
+    -- Первая роль
+    Статус1 NVARCHAR(100),
+    Фамилия1 NVARCHAR(100),
+    Имя1 NVARCHAR(100),
+    СерияПаспорта1 NVARCHAR(10),
+    НомерПаспорта1 NVARCHAR(20),
+    НомерID1 NVARCHAR(50),
+    НомерТелефона1 NVARCHAR(50),
+    НомерТелеграмма1 NVARCHAR(20),
+
+    -- Вторая роль
+    Статус2 NVARCHAR(100),
+    Фамилия2 NVARCHAR(100),
+    Имя2 NVARCHAR(100),
+    СерияПаспорта2 NVARCHAR(10),
+    НомерПаспорта2 NVARCHAR(20),
+    НомерID2 NVARCHAR(50),
+    НомерТелефона2 NVARCHAR(50),
+    НомерТелеграмма2 NVARCHAR(20),
+
+    -- Третья роль
+    Статус3 NVARCHAR(100),
+    Фамилия3 NVARCHAR(100),
+    Имя3 NVARCHAR(100),
+    СерияПаспорта3 NVARCHAR(10),
+    НомерПаспорта3 NVARCHAR(20),
+    НомерID3 NVARCHAR(50),
+    НомерТелефона3 NVARCHAR(50),
+    НомерТелеграмма3 NVARCHAR(20),
+
+    GUID UNIQUEIDENTIFIER NOT NULL DEFAULT NEWID(),
+    Рейтинг DECIMAL(5,2),
+    ФИО NVARCHAR(255),
+    ИД NVARCHAR(255)
+)
+END
+
     '''
 
     create_phones_table = '''
@@ -342,60 +366,57 @@ def Tovari_v_Puti(
     pdf.output(output_path)
     return os.path.abspath(output_path)
 
-def MyKods(user_number: str, output_path: str = "client_table.pdf"):
+def MyKods(user_number: str, output_path: str = "client_table.pdf", font_path: str = "DejaVuSans.ttf",):
     conn = get_connection()
     cursor = conn.cursor()
 
     # Получаем список кодов клиента по номеру телефона
     cursor.execute("SELECT КодКлиента FROM ТелефоныКлиентов WHERE Телефон = ?", (user_number,))
     kodKlienta = cursor.fetchall()
-    if not kodKlienta:
-        return None  # Номер не найден
-
     # Извлекаем коды клиента
     client_ids = [row[0] for row in kodKlienta]
 
     # Создаём плейсхолдеры для IN (?, ?, ...)
-    placeholders = ','.join(['?'] * len(client_ids))
-    query = f"SELECT * WHERE КодКлиента IN ({placeholders})"
-    cursor.execute(query, client_ids)
-    data_rows = cursor.fetchall()
+    placeholders = ', '.join(str(x) for x in client_ids)
+    query = f"SELECT * FROM Клиенты WHERE КодКлиента IN ({placeholders})"
+    engine = create_engine(str(config.connectinon.CONNECTION_STRING))
+    df = pd.read_sql(query, engine)
 
     # Класс PDF
     class PDF(FPDF):
-        def header(self):
-            self.set_font("Arial", "B", 12)
-            self.cell(0, 10, "Информация по клиенту", ln=True, align="C")
-            self.ln(5)
-
-        def table_header(self, col_widths):
-            headers = [
-                "Код", "Тип кода", "Статус", "Фамилия", "Имя",
-                "Серия паспорта", "Номер паспорта", "Номер ID",
-                "Номер телефона", "Номер телеграмма"
-            ]
-            self.set_font("Arial", "B", 10)
-            for i, header in enumerate(headers):
-                self.cell(col_widths[i], 10, header, border=1, align="C")
+        def table(self, df, widths):
+            self.set_font("DejaVu", "", 6)
+            for col, w in zip(df.columns, widths):
+                self.cell(w, 6, str(col), 1)
             self.ln()
-
-        def table_row(self, data, col_widths):
-            self.set_font("Arial", "", 10)
-            for i, value in enumerate(data):
-                self.cell(col_widths[i], 10, str(value) if value else "", border=1)
-            self.ln()
-
-    # Ширина колонок (в mm)
-    col_widths = [15, 20, 40, 35, 30, 20, 25, 20, 35, 35]
+            self.set_font("DejaVu", "", 5.5)
+            for _, row in df.iterrows():
+                for val, w in zip(row, widths):
+                    text = str(val)
+                    if self.get_string_width(text) > w - 2:
+                        while self.get_string_width(text + "...") > w - 2 and len(text) > 0:
+                            text = text[:-1]
+                        text += "..." if len(text) > 0 else ""
+                    self.cell(w, 5, text, 1)
+                self.ln()
 
     # Создание PDF
-    pdf = PDF(orientation='L', unit='mm', format='A4')
+    pdf = PDF("L", "mm", "A4")
+    pdf.add_font("DejaVu", "", font_path, uni=True)
+    pdf.set_auto_page_break(auto=True, margin=15)
     pdf.add_page()
-    pdf.table_header(col_widths)
-    for row in data_rows:
-        pdf.table_row(row, col_widths)
 
-    # Сохраняем PDF
+    # Автоопределение ширины колонок
+    pdf.set_font("DejaVu", "", 5.5)
+    widths = [
+        pdf.get_string_width(str(max([str(x) for x in df[col]] + [col], key=len))) + 4
+        for col in df.columns
+    ]
+
+    # Таблица
+    pdf.table(df, widths)
+
+    # Сохранение`
     pdf.output(output_path)
     return os.path.abspath(output_path)
 

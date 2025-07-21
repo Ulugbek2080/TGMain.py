@@ -17,17 +17,13 @@ class FirstName:
 @dataclass
 class TovariPut:
     tovari_put: str
-@dataclass
-class Connectinon:
-    CONNECTION_STRING: str
+
 @dataclass
 class Config:
     tg_bot: TgBot
     phone: PhoneNumber
     first_name: FirstName
     tovari_put: TovariPut
-    connectinon: Connectinon
-
 
 def load_config(path:str | None = None) -> Config:
     env =Env()
@@ -35,5 +31,4 @@ def load_config(path:str | None = None) -> Config:
     return Config(tg_bot=TgBot(token=env('BOT_TOKEN')),
                   phone=PhoneNumber(number=env('PHONE_NUMBER')),
                   first_name=FirstName(first_name=env('FIRST_NAME')),
-                  tovari_put=TovariPut(tovari_put=env('TOVI_PUT')),
-                  connectinon=Connectinon(CONNECTION_STRING=env('CONNECTION_STRING')))
+                  tovari_put=TovariPut(tovari_put=env('TOVI_PUT')),)
