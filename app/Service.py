@@ -68,6 +68,7 @@ class TovarInfo(BaseModel):
     def empty_string_to_none(cls, v):
         return None if v == "" else v
 
+
 # Подключение к SQL Server
 def get_connection():
     conn_str = (
@@ -78,6 +79,9 @@ def get_connection():
         'PWD=1212'
     )
     return pyodbc.connect(conn_str)
+
+#@app.post("/ТелефоныКлиентов")
+#def insert_Telefoni_clientov(Telefons: List[] )
 
 # POST-метод для приёма и записи складов
 @app.post("/SKLADI")

@@ -11,12 +11,11 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import pyodbc
 from sqlalchemy import create_engine
-
+from config_data.config import Config, load_config
 from app import slovar
 from app.keyboards import get_inline_keyboard_Kod
 
-connection_string = "mssql+pyodbc://sa:1212@localhost/Python_base_tg?driver=ODBC+Driver+17+for+SQL+Server"
-
+config: Config = load_config()
 
 def create_table():
     create_table_chatId()
@@ -50,6 +49,7 @@ def create_table_chatId():
             CREATE TABLE TelegramChats (
                 Код INT PRIMARY KEY,
                 Наименование NVARCHAR(255),
+                НомерТелефона NVARCHAR(20),
                 Родитель INT,
                 ЭтоГруппа BIT,
                 ПометкаУдаления BIT,
@@ -73,6 +73,7 @@ def create_table_chatId():
 
     cursor.execute(create_table_query)
     conn.commit()
+    cursor.close()
     conn.close()
 
     print("Таблица создана успешно или уже существует.")
@@ -188,7 +189,16 @@ def Create_Cliente():
         IF OBJECT_ID('Клиенты', 'U') IS NULL
         BEGIN
             CREATE TABLE Клиенты (
-                КодКлиента INT PRIMARY KEY,
+                КодКлиента INT PRIMARY KEY,       -- Пример: 00077
+                ТипКода NVARCHAR(50),            -- Пример: Авто
+                Статус NVARCHAR(100),            -- Пример: Клиент, Представитель и т.д.
+                Фамилия NVARCHAR(100),
+                Имя NVARCHAR(100),
+                СерияПаспорта NVARCHAR(10),
+                НомерПаспорта NVARCHAR(20),
+                НомерID NVARCHAR(50),
+                НомерТелефона NVARCHAR(50),
+                НомерТелеграмма NVARCHAR(20),
                 GUID UNIQUEIDENTIFIER NOT NULL,
                 Рейтинг DECIMAL(5,2),
                 ФИО NVARCHAR(255),
@@ -241,78 +251,26 @@ def Create_Scladi():
 
     print("Таблицы 'Склады' создан успешно или уже существуют.")
 
-def generate_report_pdf_test(output_path="otchet_tovary_v_puti.pdf"):
-    # Подключение к БД
-    engine = create_engine(
-        connection_string
-    )
-
-    # SQL-запрос
-    query = """
-    SELECT 
-        DataDobavleniya AS [Дата приема],
-        TovarID AS [Номер приема],
-        NomerMesta AS [Номер места],
-        Klient AS [Адрес магазина],
-        VidTovara AS [Наим. товара],
-        TipUpakovki AS [Тип упаковки],
-        VsegoMest AS [Кол-во мест],
-        Ves AS [Вес],
-        Dlina AS [Длина],
-        Shirina AS [Ширина],
-        Vysota AS [Высота],
-        Obem AS [Объем],
-        Summa AS [Сумма]
-    FROM Svedeniya_o_tovare
-    """
-
-    # Чтение в DataFrame
-    df = pd.read_sql(query, engine)
-
-    # Округление числовых колонок
-    df["Вес"] = pd.to_numeric(df["Вес"], errors="coerce").round(2)
-    df["Объем"] = pd.to_numeric(df["Объем"], errors="coerce").round(4)
-    df["Сумма"] = pd.to_numeric(df["Сумма"], errors="coerce").round(2)
-    df["Дата приема"] = pd.to_datetime(df["Дата приема"], errors="coerce").dt.date
-
-    # Создание фигуры
-    fig, ax = plt.subplots(figsize=(20, 12))  # Размер страницы A4 по ширине
-    ax.axis('off')  # Убираем оси
-
-    # Добавим заголовок и дату
-    #table_title = ""
-    #timestamp = f"Дата: {datetime.now().strftime('%d.%m.%Y %H:%M')}"
-
-    #plt.title(table_title, fontsize=4, weight='bold', loc='center')
-    #plt.figtext(0.99, 0.95, , horizontalalignment='right', fontsize=10)
-
-    # Создание таблицы
-    table = ax.table(
-        cellText=df.values,
-        colLabels=df.columns,
-        cellLoc='center',
-        loc='center',
-        bbox=[0, 0.15, 1, 0.8]
-
-    )
-
-    # Настройка таблицы
-    table.auto_set_font_size(False)
-    table.set_fontsize(8)
-    table.scale(1, 1.2)  # Увеличиваем высоту строк
-
-    # Сохраняем PDF
-    plt.savefig(output_path, bbox_inches='tight')
-
-    return os.path.abspath(output_path)
-
+def build_date_filter_from_period(period: list[tuple[int, int]]) -> str:
+    conditions = [
+        f"(YEAR(DataDobavleniya) = {year} AND MONTH(DataDobavleniya) = {month})"
+        for year, month in period
+    ]
+    return " OR ".join(conditions)
 
 def Tovari_v_Puti(
         kod,
+        period: list[tuple[int, int]],
+        statusi: str,
         output_path: str = "StatusiTovarov_report.pdf",
         top_n: int = 500,
         font_path: str = "DejaVuSans.ttf",
+
 ) -> str:
+    date_filter = None
+    if period is not None:
+        date_filter = build_date_filter_from_period(period)
+
     query = f"""
         SELECT TOP {top_n}
             DataPriema AS ДатаПриёма,
@@ -334,10 +292,12 @@ def Tovari_v_Puti(
             TochkaMarshruta AS Местоположение,
             DataPribytiyaIliTekushchaya AS РасчётнаяДатаПрибытия
         FROM StatusiTovarov
-        WHERE Statusy IN (1, 2, 3, 4) AND CAST(KodKlienta AS INT) = {int(kod)}
+        WHERE Statusy IN ({statusi}) AND CAST(KodKlienta AS INT) = {int(kod)}
     """
+    if date_filter:
+        query += f"\nAND ({date_filter})"
 
-    engine = create_engine(connection_string)
+    engine = create_engine(str(config.connectinon.CONNECTION_STRING))
     df = pd.read_sql(query, engine)
 
     for col in ["Вес", "Объём", "Сумма", "Длинна", "Ширина", "Высота"]:
@@ -345,7 +305,6 @@ def Tovari_v_Puti(
     for col in ["ДатаПриёма", "РасчётнаяДатаПрибытия"]:
         df[col] = pd.to_datetime(df[col], errors="coerce").dt.date
 
-    # Класс PDF с Unicode-шрифтом
     class PDF(FPDF):
         def table(self, df, widths):
             self.set_font("DejaVu", "", 6)
@@ -379,7 +338,64 @@ def Tovari_v_Puti(
     # Таблица
     pdf.table(df, widths)
 
-    # Сохранениеx`
+    # Сохранение`
+    pdf.output(output_path)
+    return os.path.abspath(output_path)
+
+def MyKods(user_number: str, output_path: str = "client_table.pdf"):
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    # Получаем список кодов клиента по номеру телефона
+    cursor.execute("SELECT КодКлиента FROM ТелефоныКлиентов WHERE Телефон = ?", (user_number,))
+    kodKlienta = cursor.fetchall()
+    if not kodKlienta:
+        return None  # Номер не найден
+
+    # Извлекаем коды клиента
+    client_ids = [row[0] for row in kodKlienta]
+
+    # Создаём плейсхолдеры для IN (?, ?, ...)
+    placeholders = ','.join(['?'] * len(client_ids))
+    query = f"SELECT * WHERE КодКлиента IN ({placeholders})"
+    cursor.execute(query, client_ids)
+    data_rows = cursor.fetchall()
+
+    # Класс PDF
+    class PDF(FPDF):
+        def header(self):
+            self.set_font("Arial", "B", 12)
+            self.cell(0, 10, "Информация по клиенту", ln=True, align="C")
+            self.ln(5)
+
+        def table_header(self, col_widths):
+            headers = [
+                "Код", "Тип кода", "Статус", "Фамилия", "Имя",
+                "Серия паспорта", "Номер паспорта", "Номер ID",
+                "Номер телефона", "Номер телеграмма"
+            ]
+            self.set_font("Arial", "B", 10)
+            for i, header in enumerate(headers):
+                self.cell(col_widths[i], 10, header, border=1, align="C")
+            self.ln()
+
+        def table_row(self, data, col_widths):
+            self.set_font("Arial", "", 10)
+            for i, value in enumerate(data):
+                self.cell(col_widths[i], 10, str(value) if value else "", border=1)
+            self.ln()
+
+    # Ширина колонок (в mm)
+    col_widths = [15, 20, 40, 35, 30, 20, 25, 20, 35, 35]
+
+    # Создание PDF
+    pdf = PDF(orientation='L', unit='mm', format='A4')
+    pdf.add_page()
+    pdf.table_header(col_widths)
+    for row in data_rows:
+        pdf.table_row(row, col_widths)
+
+    # Сохраняем PDF
     pdf.output(output_path)
     return os.path.abspath(output_path)
 
@@ -390,56 +406,11 @@ def wrap_text(text, width=30):
         return '\n'.join(textwrap.wrap(text, width=width))
     return text
 
-def Vse_tovari(output_path="Vse_tovari.pdf"):
-    # Подключение к БД
-    engine = create_engine(connection_string
-    )
 
-    # SQL-запрос — выбираем все поля с нужными статусами
-    query = """
-    SELECT *
-    FROM StatusiTovarov
-    WHERE Status IN (1, 2, 3, 4, 5, 6)
-    """
-
-    # Чтение в DataFrame
-    df = pd.read_sql(query, engine)
-
-    # Преобразование и округление чисел и даты, если такие столбцы есть
-    for col in ["Ves", "Obem", "Summa", "Dlina", "Shirina", "Vysota", "Cena"]:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors="coerce").round(2)
-
-    for col in ["DataDobavleniya", "DataPriema", "DataPribytiya", "DataPribytiyaIliTekushchaya"]:
-        if col in df.columns:
-            df[col] = pd.to_datetime(df[col], errors="coerce").dt.date
-
-    # Создание фигуры
-    fig, ax = plt.subplots(figsize=(22, 14))  # увеличенный размер
-    ax.axis('off')
-
-    # Создание таблицы
-    table = ax.table(
-        cellText=df.values,
-        colLabels=df.columns,
-        cellLoc='center',
-        loc='center',
-        bbox=[0, 0.1, 1, 0.85]
-    )
-
-    # Настройка таблицы
-    table.auto_set_font_size(False)
-    table.set_fontsize(7)
-    table.scale(1, 1.1)
-
-    # Сохраняем PDF
-    plt.savefig(output_path, bbox_inches='tight')
-
-    return os.path.abspath(output_path)
 
 def Poluchennie_tovari(output_path="Vse_tovari.pdf"):
     # Подключение к БД
-    engine = create_engine(connection_string    )
+    engine = create_engine(str(config.connectinon)    )
 
     # SQL-запрос — выбираем все поля с нужными статусами
     query = """
@@ -485,7 +456,7 @@ def Poluchennie_tovari(output_path="Vse_tovari.pdf"):
 
 def Pribivshie_tovati(output_path="Vse_tovari.pdf"):
     # Подключение к БД
-    engine = create_engine(connection_string
+    engine = create_engine(str(config.connectinon)
     )
 
     # SQL-запрос — выбираем все поля с нужными статусами
@@ -598,7 +569,7 @@ def fill_svedeniya_test_data(count=10):
     #
 
 # Добавленые данных
-def check_and_add_user(telegram_id, username, first_name, last_name):
+def check_and_add_user(telegram_id, username, first_name, last_name, phone_number):
     conn = get_connection()
     cursor = conn.cursor()
 
@@ -614,13 +585,13 @@ def check_and_add_user(telegram_id, username, first_name, last_name):
         # Добавляем нового пользователя
         cursor.execute("""
             INSERT INTO TelegramChats (
-                Код, Наименование, Родитель, ЭтоГруппа, ПометкаУдаления,
+                Код, Наименование, НомерТелефона,Родитель, ЭтоГруппа, ПометкаУдаления,
                 Предопределенный, ИмяПредопределенныхДанных, Ид,
                 чТип, чЗаголовок, чИнтернетИмя, чИмя, чФамилия,
                 пЭтоБот, пИмя, пФамилия, пИнтернетИмя, пКодЯзыка, Ссылка
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-                       new_code, f'{first_name} {last_name}', None, 0, 0, 0, None, telegram_id,
+                       new_code, f'{first_name} {last_name}', phone_number,None, 0, 0, 0, None, telegram_id,
                        'user', None, username, first_name, last_name,
                        0, None, None, None, 'ru', None)
 

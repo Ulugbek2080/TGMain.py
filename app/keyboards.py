@@ -124,73 +124,8 @@ def get_inline_keyboard_MyCodes() -> InlineKeyboardMarkup:
     data = http_request.get_http_MyCodes()
     return InlineKeyboardMarkup(inline_keyboard=data)
 
-async def build_date_selection_keyboard(user_input: str, state: FSMContext, lang: str) -> InlineKeyboardMarkup:
-    data = await state.get_data()
-    selected_dates = data.get("selected_dates", [])
-
-    # Определим год, который будет в заголовке
-    current_year = datetime.today().year
-    current_month = datetime.today().month
-
-    if user_input.startswith("YearL_") or user_input.startswith("YearR_") or user_input.startswith("YearY_"):
-        base_date = datetime.strptime(user_input.split("_")[1], "%Y%m%d")
-        if "YearL_" in user_input:
-            current_year = base_date.year - 1
-        elif "YearR_" in user_input:
-            current_year = base_date.year + 1
-        else:
-            current_year = base_date.year
-
-    # Верхняя строка – год и стрелки
-    year_row = [
-        create_inline_button("<", f"YearL_{current_year}0101"),
-        create_inline_button(str(current_year), f"YearY_{current_year}0101"),
-        create_inline_button(">", f"YearR_{current_year}0101")
-    ]
-
-    # Месяцы
-    month_buttons = []
-    for month in range(1, 13):
-        date_code = f"{current_year}{month:02}01"
-        readable_date = datetime(current_year, month, 1)
-        month_name = slovar.get_dictionary(readable_date.strftime("%B"), lang)
-
-        if date_code in selected_dates:
-            text = f"✅ {month_name}"
-            callback_data = f"TimM_{date_code}"  # Убираем
-        else:
-            text = month_name
-            callback_data = f"TimN_{date_code}"  # Добавляем
-
-        month_buttons.append(create_inline_button(text, callback_data))
-
-    # Разбиваем на строки по 3 кнопки
-    month_rows = [month_buttons[i:i+3] for i in range(0, len(month_buttons), 3)]
-
-    # Последняя кнопка "Сформировать"
-    finish_text = slovar.get_dictionary("СФормировать", lang)
-    finish_button = [create_inline_button(finish_text, "Sformirovat_")]
-
-    return InlineKeyboardMarkup(
-        inline_keyboard=[year_row] + month_rows + [finish_button]
-    )
-
 def create_inline_button(text: str, callback_data: str) -> InlineKeyboardButton:
     return InlineKeyboardButton(text=text, callback_data=callback_data)
-
-async def handle_month_selection(callback_data: str, state: FSMContext):
-    data = await state.get_data()
-    selected_dates = set(data.get("selected_dates", []))
-
-    if callback_data.startswith("TimM_"):  # убрать
-        date_str = callback_data.replace("TimM_", "")
-        selected_dates.discard(date_str)
-    elif callback_data.startswith("TimN_"):  # добавить
-        date_str = callback_data.replace("TimN_", "")
-        selected_dates.add(date_str)
-
-    # Обновим в состоянии
-    await state.update_data(selected_dates=list(selected_dates))
 
 def get_contact_request_keyboard(lang: str) -> ReplyKeyboardMarkup:
     contact_text = slovar.get_dictionary("КнопкаОтправкаНомераТелефона", lang)
@@ -213,4 +148,48 @@ def get_inline_keyboard_Kod(kods) -> InlineKeyboardMarkup:
     ])
     return keyboard
 
+MONTHS = [
+    "Янв", "Фев", "Мар", "Апр", "Май", "Июн",
+    "Июл", "Авг", "Сен", "Окт", "Ноя", "Дек"
+]
 
+def get_period_keyboard(selected: list[tuple[int, int]], year: int) -> InlineKeyboardMarkup:
+    keyboard = []
+
+    # Верхняя навигация по годам
+    keyboard.append([
+        InlineKeyboardButton(text='←', callback_data="year_prev"),
+        InlineKeyboardButton(text=str(year), callback_data="noop"),
+        InlineKeyboardButton(text="→", callback_data="year_next"),
+    ])
+
+    # Получаем границы выделения
+    sorted_sel = sorted(selected)
+    if len(sorted_sel) == 2:
+        y1, m1 = sorted_sel[0]
+        y2, m2 = sorted_sel[1]
+        def in_range(yy, mm):
+            return (y1, m1) <= (yy, mm) <= (y2, m2)
+    else:
+        def in_range(yy, mm):
+            return (yy, mm) in selected
+
+    # Месяцы
+    row = []
+    for i, month in enumerate(MONTHS, 1):
+        if in_range(year, i):
+            label = f"{month} ✅"
+        else:
+            label = month
+        row.append(InlineKeyboardButton(text=label, callback_data=f"month_{i}_{year}"))
+        if i % 3 == 0:
+            keyboard.append(row)
+            row = []
+
+    if row:
+        keyboard.append(row)
+
+    keyboard.append([
+        InlineKeyboardButton(text="Сформировать", callback_data="submit_period")
+    ])
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
