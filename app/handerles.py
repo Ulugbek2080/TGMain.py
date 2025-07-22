@@ -18,7 +18,7 @@ config: Config = load_config()
 sklady = DATA_BaseTG.get_all_sklady()
 user_selection = {}  # user_id -> set of selected GUIDs
 router = Router()
-TovariZap = config.tovari_put
+TovariZap = config.tovari_put.tovari_put
 lang = 'ru'
 user_periods: dict[int, list[tuple[int, int]]] = {}
 user_id = None
@@ -73,7 +73,6 @@ async def language_selected(message: Message, state: FSMContext):
 @router.message(F.contact)
 async def some_handler(message: Message, state: FSMContext):
     Dostup = Check_Client(message.contact.phone_number)
-    Dostup = True
     if Dostup:
         user = message.from_user
         telegram_id = str(user.id)  # Важно: преобразуем в строку, если поле в базе GUID
@@ -148,7 +147,7 @@ async def handle_back(message: Message):
 async def handle_operator_help(message: Message):
     await message.bot.send_contact(
         chat_id=message.chat.id,
-        phone_number=str(config.phone),
+        phone_number=config.phone.number,
         first_name=config.first_name.first_name,
     )
     #Товары
@@ -252,8 +251,6 @@ async def handle_month_select(callback: CallbackQuery, state: FSMContext):
     await callback.message.edit_reply_markup(reply_markup=kb)
     await callback.answer()
 
-
-
 @router.callback_query(F.data == "submit_period")
 async def handle_submit_period(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
@@ -296,19 +293,28 @@ async def handle_received_goods(message: Message):
     await Otchyt('ПолученныеТовары', message)
 @router.message(F.text== slovar.get_dictionary('МоиКоды', lang))
 async def handle_my_codes(message: Message):
-    global  user_id
-    conn = DATA_BaseTG.get_connection()  # или pyodbc.connect(...)
+    conn = DATA_BaseTG.get_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT НомерТелефона FROM TelegramChats WHERE Ид = ?", (message.from_user.id,))
-    telefon_numbers = cursor.fetchone()
-    cleaned_numbers = telefon_numbers[0][1:]
-    file_path = DATA_BaseTG.MyKods(str(cleaned_numbers))  # Добавляем код!
-    doc = FSInputFile(file_path)
+    result = cursor.fetchone()
 
+    if not result:
+        await message.answer("Телефон не найден.")
+        return
+
+    user_number = result[0].lstrip('+')
+    file_path = DATA_BaseTG.MyKods(user_number)
+
+    if not file_path:
+        await message.answer("Коды клиента не найдены.")
+        return
+
+    doc = FSInputFile(file_path)
     await message.answer_document(
         document=doc,
         caption=f"📦 {slovar.get_dictionary('ОтчетМоиКоды', lang)}"
     )
+
 @router.message(F.text== slovar.get_dictionary('АдресаСкладов', lang))
 async def handle_warehouses(message: Message):
     await message.answer(
@@ -319,7 +325,7 @@ async def handle_warehouses(message: Message):
 @router.message(
     F.text== slovar.get_dictionary('СписокЗапрещенныхТоваров', lang))
 async def handle_banned_goods(message: Message):
-    doc = FSInputFile(str(TovariZap), filename="Список запрещенных товаров.docx")
+    doc = FSInputFile(str(TovariZap))
     await message.answer_document(document=doc)
     # Скалды
 

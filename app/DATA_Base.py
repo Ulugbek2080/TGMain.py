@@ -4,7 +4,7 @@ import random
 from datetime import datetime
 from datetime import timedelta
 
-from aiogram.types import CallbackQuery
+from aiogram.types import CallbackQuery, TelegramObject
 from fpdf import FPDF
 
 import matplotlib.pyplot as plt
@@ -366,59 +366,136 @@ def Tovari_v_Puti(
     pdf.output(output_path)
     return os.path.abspath(output_path)
 
-def MyKods(user_number: str, output_path: str = "client_table.pdf", font_path: str = "DejaVuSans.ttf",):
+def MyKods(user_number: str, output_path: str = "client_table.pdf", font_path: str = "DejaVuSans.ttf"):
     conn = get_connection()
     cursor = conn.cursor()
 
     # Получаем список кодов клиента по номеру телефона
     cursor.execute("SELECT КодКлиента FROM ТелефоныКлиентов WHERE Телефон = ?", (user_number,))
     kodKlienta = cursor.fetchall()
-    # Извлекаем коды клиента
-    client_ids = [row[0] for row in kodKlienta]
+    if not kodKlienta:
+        return None
 
-    # Создаём плейсхолдеры для IN (?, ?, ...)
-    placeholders = ', '.join(str(x) for x in client_ids)
+    client_ids = [str(row[0]) for row in kodKlienta]
+    placeholders = ','.join(client_ids)
     query = f"SELECT * FROM Клиенты WHERE КодКлиента IN ({placeholders})"
+
     engine = create_engine(str(config.connectinon.CONNECTION_STRING))
     df = pd.read_sql(query, engine)
 
-    # Класс PDF
+    # Готовим данные: 1 строка = 1 роль, но КодКлиента и ТипКода только для первой строки каждого клиента
+    rows = []
+    for _, row in df.iterrows():
+        for i in range(1, 4):
+            rows.append({
+                "КодКлиента": row["КодКлиента"],
+                "ТипКода": row["ТипКода"],
+                "Статус": row.get(f"Статус{i}", ""),
+                "Фамилия": row.get(f"Фамилия{i}", ""),
+                "Имя": row.get(f"Имя{i}", ""),
+                "СерияПаспорта": row.get(f"СерияПаспорта{i}", ""),
+                "НомерПаспорта": row.get(f"НомерПаспорта{i}", ""),
+                "НомерID": row.get(f"НомерID{i}", ""),
+                "НомерТелефона": row.get(f"НомерТелефона{i}", ""),
+                "НомерТелеграмма": row.get(f"НомерТелеграмма{i}", ""),
+                "GUID": row.get("GUID", ""),
+                "Рейтинг": row.get("Рейтинг", ""),
+                "ИД": row.get("ИД", "")
+            })
+
+    result_df = pd.DataFrame(rows)
+    # Скрываем повторы КодКлиента и ТипКода для строк после первой
+    result_df["КодКлиента"] = result_df["КодКлиента"].astype(str)
+    result_df["ТипКода"] = result_df["ТипКода"].astype(str)
+
+    prev_code = None
+    prev_type = None
+    for idx, r in result_df.iterrows():
+        if r["КодКлиента"] == prev_code and r["ТипКода"] == prev_type:
+            result_df.at[idx, "КодКлиента"] = ""
+            result_df.at[idx, "ТипКода"] = ""
+        else:
+            prev_code = r["КодКлиента"]
+            prev_type = r["ТипКода"]
+
+
     class PDF(FPDF):
         def table(self, df, widths):
             self.set_font("DejaVu", "", 6)
-            for col, w in zip(df.columns, widths):
-                self.cell(w, 6, str(col), 1)
-            self.ln()
-            self.set_font("DejaVu", "", 5.5)
-            for _, row in df.iterrows():
-                for val, w in zip(row, widths):
-                    text = str(val)
-                    if self.get_string_width(text) > w - 2:
-                        while self.get_string_width(text + "...") > w - 2 and len(text) > 0:
-                            text = text[:-1]
-                        text += "..." if len(text) > 0 else ""
-                    self.cell(w, 5, text, 1)
-                self.ln()
+            cols = df.columns.tolist()
 
-    # Создание PDF
+            # Заголовок
+            for col, w in zip(cols, widths):
+                self.cell(w, 6, col, 1, 0, 'C')
+            self.ln()
+            self.set_font("DejaVu", "", 5)
+
+            row_height = 5
+            i = 0
+
+            while i < len(df):
+                row = df.iloc[i]
+                client_code = row["КодКлиента"]
+                type_code = row["ТипКода"]
+
+                mask = (df["КодКлиента"] == client_code) & (df["ТипКода"] == type_code)
+                rowspan = df[mask].shape[0]
+                total_height = rowspan * row_height
+
+                y_start = self.get_y()
+                x_start = self.get_x()
+
+                # ===== КодКлиента =====
+                self.rect(x_start, y_start, widths[0], total_height)
+                self.set_xy(x_start, y_start + (total_height - row_height) / 2)
+                self.cell(widths[0], row_height, str(client_code), 0, 0, 'C')
+
+                # ===== ТипКода =====
+                x_type = x_start + widths[0]
+                self.rect(x_type, y_start, widths[1], total_height)
+                self.set_xy(x_type, y_start + (total_height - row_height) / 2)
+                self.cell(widths[1], row_height, str(type_code), 0, 0, 'C')
+
+                # ===== Остальные строки =====
+                for j in range(rowspan):
+                    row = df.iloc[i + j]
+                    self.set_y(y_start + j * row_height)
+                    self.set_x(x_start + widths[0] + widths[1])
+
+                    for k in range(2, len(cols)):
+                        val = str(row[cols[k]]) if row[cols[k]] is not None else ""
+
+                        # Удаляем символы перевода строки
+                        #val = val.replace('\n', ' ').replace('\r', ' ')
+
+                        # Обрезаем, если текст не влезает
+                        w = widths[k]
+                        if self.get_string_width(val) > w - 2:
+                            while self.get_string_width(val + "...") > w - 2 and len(val) > 0:
+                                val = val[:-1]
+                            val += "..." if val else ""
+
+                        self.cell(w, row_height, val, 1)
+                    self.ln()
+
+                self.set_y(y_start + total_height)
+                i += rowspan
+
+    df_from_sql = pd.DataFrame(rows)
+
+    # Автоматически рассчитать ширины
+    columns = df_from_sql.columns.tolist()
+    widths_sql = [25, 25] + [max(30, len(col) * 2.2) for col in columns[2:]]
+
+    # Сгенерируем PDF с одной группой клиента
     pdf = PDF("L", "mm", "A4")
     pdf.add_font("DejaVu", "", font_path, uni=True)
-    pdf.set_auto_page_break(auto=True, margin=15)
     pdf.add_page()
-
-    # Автоопределение ширины колонок
-    pdf.set_font("DejaVu", "", 5.5)
-    widths = [
-        pdf.get_string_width(str(max([str(x) for x in df[col]] + [col], key=len))) + 4
-        for col in df.columns
-    ]
-
-    # Таблица
-    pdf.table(df, widths)
-
-    # Сохранение`
+    pdf.table(df_from_sql, widths_sql)
     pdf.output(output_path)
     return os.path.abspath(output_path)
+
+
 
 
 def wrap_text(text, width=30):
@@ -630,6 +707,7 @@ def check_Client(PhoneNumber):
     cursor = conn.cursor()
     result = False
     # Проверяем наличие по Ид (можно также по telegram_id, если хранится отдельно)
+    PhoneNumber = PhoneNumber[1:]
     cursor.execute("SELECT COUNT(*) FROM ТелефоныКлиентов WHERE Телефон = ?", PhoneNumber)
     exists = cursor.fetchone()[0]
 
